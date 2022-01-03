@@ -1,25 +1,31 @@
 package main
 
 import (
+	"net/http"
 	"time"
+
 	"enigmacamp.com/go-jwt/authenticator"
 	mdw "enigmacamp.com/go-jwt/middleware"
 	"enigmacamp.com/go-jwt/model"
 	"github.com/gin-gonic/gin"
+	"github.com/go-redis/redis/v8"
 	"github.com/golang-jwt/jwt"
 )
 
-
-
-
-
 func main() {
 	r := gin.Default()
+	client := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+		DB: 0,
+	})
+
+
 	tokenConfig := authenticator.TokenConfig{
 		ApplicationName: "ENIGMA",
 		JwtSigningMethod: jwt.SigningMethodHS256,
 		JwtSignatureKey: "P@ssw0rd",
-		AccessTokenLifeTime: 30 *time.Second,
+		AccessTokenLifeTime: 60 *time.Second,
+		Client: client,
 	}
 	tokenService := authenticator.NewTokenService(tokenConfig)
 	r.Use(mdw.NewTokenValidator(tokenService).RequireToken())
@@ -30,7 +36,7 @@ func main() {
 		var user model.Credential
 
 		if err := c.BindJSON(&user); err != nil {
-			c.JSON(400, gin.H{
+			c.JSON(http.StatusBadRequest, gin.H{
 				"message": "can't bind struct",
 			})
 			return
@@ -40,9 +46,15 @@ func main() {
 
 			token, err := tokenService.CreateAccessToken(&user)
 			if err != nil {
-				c.AbortWithStatus(401)
+				c.AbortWithStatus(http.StatusUnauthorized)
+				return
 			}
-			c.JSON(200, gin.H{
+			err = tokenService.StoreAccessToken(user.Username,token)
+			if err != nil{
+				c.AbortWithStatus(http.StatusUnauthorized)
+				return
+			}
+			c.JSON(http.StatusOK,gin.H{
 				"token": token,
 			})
 		} else {
@@ -52,7 +64,7 @@ func main() {
 
 	publicRoute.GET("/user", func(c *gin.Context) {
 		c.JSON(200, gin.H{
-			"message": "user",
+			"message": c.GetString("username"),
 		})
 	})
 
